@@ -49,22 +49,31 @@ function replacementForResult(result) {
  */
 export const PromptManagerPlugin = async (_ctx) => {
   const recentlyHandled = new Map();
+  const DEDUP_TTL_MS = 5000;
+
+  function pruneExpired(now) {
+    for (const [k, entry] of recentlyHandled.entries()) {
+      if (now - entry.at > DEDUP_TTL_MS) {
+        recentlyHandled.delete(k);
+      }
+    }
+  }
 
   function markHandled(sessionID, text) {
-    if (!sessionID) return;
-    recentlyHandled.set(sessionID, { text, at: Date.now() });
+    const now = Date.now();
+    pruneExpired(now);
+    const key = sessionID || "__default__";
+    recentlyHandled.set(key, { text, at: now });
   }
 
   function wasJustHandled(sessionID, text) {
-    if (!sessionID) return false;
-    const entry = recentlyHandled.get(sessionID);
+    const now = Date.now();
+    pruneExpired(now);
+    const key = sessionID || "__default__";
+    const entry = recentlyHandled.get(key);
     if (!entry) return false;
-    if (Date.now() - entry.at > 5000) {
-      recentlyHandled.delete(sessionID);
-      return false;
-    }
     if (entry.text === text) {
-      recentlyHandled.delete(sessionID);
+      recentlyHandled.delete(key);
       return true;
     }
     return false;
@@ -75,7 +84,7 @@ export const PromptManagerPlugin = async (_ctx) => {
       config.command = config.command || {};
       if (!config.command.p) {
         config.command.p = {
-          description: "Save, edit, list, or send reusable prompts (/p <id> or /p e <id> <text>)",
+          description: "Save, edit, inspect, delete, list, or send reusable prompts (/p <id>, /p e <id> <text>, /p d <id>)",
           template: "/p $ARGUMENTS",
         };
       }
@@ -89,7 +98,8 @@ export const PromptManagerPlugin = async (_ctx) => {
     },
 
     "command.execute.before": async (input, output) => {
-      if (!input || (input.command !== "p" && input.command !== "prompt-manager:p")) {
+      const commandName = typeof input?.command === "string" ? input.command.replace(/^\/+/, "") : "";
+      if (commandName !== "p" && commandName !== "prompt-manager:p") {
         return;
       }
       const args = typeof input.arguments === "string" ? input.arguments.trim() : "";

@@ -1,8 +1,8 @@
-# Prompt Manager (`prompt-manager`)
+# Prompt Manager for agentic coding harness platforms (`p-plugin`)
 
-A multi-tool plugin for **Antigravity**, **Claude Code**, and **OpenCode** that lets you save, edit, list, and send reusable prompt instructions by ID using `/p <id>` and `/p e <id> <text>`.
+A prompt manager plugin for **Antigravity**, **Claude Code**, and **OpenCode** that lets you save, edit, list, and send reusable prompt instructions (templates) by ID using `/p <id>` and edit using `/p e <id> <text>`.
 
-Built with zero external runtime dependencies (Node.js `>= 18`), it pairs deterministic pre-model hook interception with an `SKILL.md` slash command, a stdio MCP server, and a standalone CLI.
+Built with zero external runtime dependencies (Node.js `>= 18`), it pairs deterministic pre-model hook interception with a `SKILL.md` slash command, a stdio MCP server, and a standalone CLI.
 
 ---
 
@@ -15,7 +15,9 @@ Built with zero external runtime dependencies (Node.js `>= 18`), it pairs determ
   - [OpenCode](#opencode)
 - [Usage](#usage)
   - [Save or Edit a Prompt (`/p e <id> <text>`)](#save-or-edit-a-prompt-p-e-id-text)
+  - [Inspect a Saved Prompt (`/p e <id>`)](#inspect-a-saved-prompt-p-e-id)
   - [Send a Saved Prompt (`/p <id>`)](#send-a-saved-prompt-p-id)
+  - [Delete a Saved Prompt (`/p d <id>`)](#delete-a-saved-prompt-p-d-id)
   - [List Saved Prompts (`/p`)](#list-saved-prompts-p)
   - [Manage Prompts via Natural Language (MCP Tools)](#manage-prompts-via-natural-language-mcp-tools)
   - [Standalone CLI (`scripts/p.mjs`)](#standalone-cli-scriptspmjs)
@@ -152,7 +154,7 @@ Use `e` as the first argument to add a new prompt or overwrite an existing one:
 /p e 1 "begin doing the things you do best, but only if you think it's the best thing to do. Begin if you think you're ready, and if not then ask me about it for more information"
 ```
 
-- **ID rules**: `<saved_prompt_ID>` can be numeric (`1`, `2`) or named (`review`, `plan-api`), cannot contain whitespace, and cannot be `e` (which is reserved for add/edit).
+- **ID rules**: `<saved_prompt_ID>` can be numeric (`1`, `2`) or named (`review`, `plan-api`), cannot contain whitespace, and cannot be `e` (reserved for edit/inspect) or `d` (reserved for delete).
 - **Quoting**: Outer matching `"..."` or `'...'` quotes are stripped (with `\"` / `\'` / `\\` unescaped). Unquoted multi-word text and multi-line prompts are also preserved:
   ```text
   /p e review Review staged git changes for bugs, edge cases, and missing tests
@@ -161,9 +163,19 @@ Use `e` as the first argument to add a new prompt or overwrite an existing one:
 
 ---
 
+### Inspect a Saved Prompt (`/p e <id>`)
+
+Run `/p e <id>` (with no text) to view the full saved text for `<id>` before overwriting or deleting it:
+
+```text
+/p e 1
+```
+
+---
+
 ### Send a Saved Prompt (`/p <id>`)
 
-Pass any ID other than `e` as the first argument to expand and send that saved instruction to the agent:
+Pass any saved ID (other than `e` or `d`) as the first argument to expand and send that saved instruction to the agent:
 
 ```text
 /p 1
@@ -180,7 +192,15 @@ You can also append extra per-turn context after the ID:
 
 ---
 
-- **Inspect an existing prompt**: Run `/p e <id>` (with no text) to view the full saved text for `<id>` before overwriting it.
+### Delete a Saved Prompt (`/p d <id>`)
+
+Use `d` as the first argument to remove a saved prompt by ID:
+
+```text
+/p d 1
+```
+
+---
 
 ### List Saved Prompts (`/p`)
 
@@ -205,20 +225,24 @@ When the bundled MCP server (`prompts` in Antigravity/Claude Code, `prompt-manag
 
 ### Standalone CLI (`scripts/p.mjs`)
 
-You can manage your prompt store directly from any terminal:
+You can manage your prompt store directly from any terminal (or via `p` if linked with `npm link`):
 
 ```bash
-# List all saved prompts
+# List all saved prompts (add --json for JSON output)
 node scripts/p.mjs list
 
-# Print a saved prompt by ID
+# Print a saved prompt by ID (add --json for metadata + timestamps)
 node scripts/p.mjs get 1
 
-# Add or update a prompt
+# Add or update a prompt (or pipe stdin / pass --stdin for multi-line text)
 node scripts/p.mjs set 1 "Check every edge case carefully"
+cat prompt.txt | node scripts/p.mjs set 1
 
 # Delete a prompt
 node scripts/p.mjs delete 1
+
+# Print the active prompt store path
+node scripts/p.mjs path
 ```
 
 ---
@@ -227,9 +251,10 @@ node scripts/p.mjs delete 1
 
 Prompts are stored atomically as JSON (`{ "version": 1, "prompts": { ... } }`). The store path is resolved in this order:
 
-1. `PROMPT_MANAGER_STORE_PATH` — explicit file path override
-2. Existing legacy/tool store if already present (`${PLUGIN_DATA}/prompts.json`, `${CLAUDE_PLUGIN_DATA}/prompts.json`, or `~/.gemini/config/prompt-manager/prompts.json`)
-3. `~/.prompt-manager/prompts.json` — default shared path across Antigravity, Claude Code, OpenCode, and `scripts/p.mjs`
+1. `PROMPT_MANAGER_STORE_PATH` — explicit file path override (supports leading `~/`)
+2. `~/.prompt-manager/prompts.json` — shared default across Antigravity, Claude Code, OpenCode, and `scripts/p.mjs` (used if already present)
+3. Existing legacy/tool store if present (`${PLUGIN_DATA}/prompts.json`, `${CLAUDE_PLUGIN_DATA}/prompts.json`, or `~/.gemini/config/prompt-manager/prompts.json`)
+4. `~/.prompt-manager/prompts.json` — default location when creating a new store
 
 ### Overriding the storage location
 

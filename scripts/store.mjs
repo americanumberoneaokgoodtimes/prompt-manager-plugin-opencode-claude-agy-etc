@@ -4,19 +4,32 @@ import path from "node:path";
 import crypto from "node:crypto";
 
 const STORE_VERSION = 1;
-const RESERVED_IDS = new Set(["e", "__proto__", "constructor", "prototype"]);
+const PROTOTYPE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+const RESERVED_COMMAND_IDS = new Set(["e", "d"]);
+const RESERVED_IDS = new Set([...PROTOTYPE_KEYS, ...RESERVED_COMMAND_IDS]);
+
+function expandHomePath(filePath) {
+  if (filePath === "~") {
+    return os.homedir();
+  }
+  if (filePath.startsWith("~/") || filePath.startsWith("~\\")) {
+    return path.join(os.homedir(), filePath.slice(2));
+  }
+  return filePath;
+}
 
 /**
  * Resolve the persistent JSON file path used to store saved prompts.
  * Order of precedence:
- * 1. PROMPT_MANAGER_STORE_PATH (explicit file override)
- * 2. Existing tool-specific store if already populated (migration/compat)
- * 3. ~/.prompt-manager/prompts.json (shared default across Antigravity, Claude Code, OpenCode, and CLI)
+ * 1. PROMPT_MANAGER_STORE_PATH (explicit file override, supports leading ~/)
+ * 2. ~/.prompt-manager/prompts.json if it already exists (shared default)
+ * 3. Existing tool-specific store if present (PLUGIN_DATA, CLAUDE_PLUGIN_DATA, ~/.gemini/config/prompt-manager/prompts.json)
+ * 4. ~/.prompt-manager/prompts.json (default for new stores)
  */
 export function resolveStorePath() {
   const explicit = process.env.PROMPT_MANAGER_STORE_PATH?.trim();
   if (explicit) {
-    return path.resolve(explicit);
+    return path.resolve(expandHomePath(explicit));
   }
 
   const sharedDefault = path.join(os.homedir(), ".prompt-manager", "prompts.json");
@@ -54,20 +67,32 @@ export function loadStore(storePath = resolveStorePath()) {
   if (!raw.trim()) {
     return emptyStore();
   }
-  const parsed = JSON.parse(raw);
-  if (!parsed || typeof parsed !== "object" || typeof parsed.prompts !== "object" || Array.isArray(parsed.prompts)) {
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`Failed to parse prompt store at ${storePath}: ${err?.message || err}`);
+  }
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    Array.isArray(parsed) ||
+    !parsed.prompts ||
+    typeof parsed.prompts !== "object" ||
+    Array.isArray(parsed.prompts)
+  ) {
     throw new Error(`Invalid prompt store format in ${storePath}`);
   }
   const prompts = Object.create(null);
   for (const [id, entry] of Object.entries(parsed.prompts)) {
-    if (RESERVED_IDS.has(id)) continue;
+    if (PROTOTYPE_KEYS.has(id)) continue;
     if (typeof entry === "string") {
       prompts[id] = { text: entry };
     } else if (entry && typeof entry === "object" && typeof entry.text === "string") {
       prompts[id] = {
         text: entry.text,
-        ...(entry.createdAt ? { createdAt: entry.createdAt } : {}),
-        ...(entry.updatedAt ? { updatedAt: entry.updatedAt } : {}),
+        ...(typeof entry.createdAt === "string" && entry.createdAt ? { createdAt: entry.createdAt } : {}),
+        ...(typeof entry.updatedAt === "string" && entry.updatedAt ? { updatedAt: entry.updatedAt } : {}),
       };
     }
   }
@@ -85,9 +110,9 @@ export function saveStore(store, storePath = resolveStorePath()) {
   const dir = path.dirname(storePath);
   fs.mkdirSync(dir, { recursive: true });
   const tmpPath = path.join(dir, `.prompts.${process.pid}.${crypto.randomBytes(4).toString("hex")}.tmp`);
-  const plainPrompts = {};
+  const plainPrompts = Object.create(null);
   for (const [id, entry] of Object.entries(store.prompts)) {
-    if (!RESERVED_IDS.has(id)) {
+    if (!PROTOTYPE_KEYS.has(id)) {
       plainPrompts[id] = entry;
     }
   }
@@ -138,8 +163,14 @@ export function validatePromptId(id) {
   if (/\s/.test(id)) {
     throw new Error("Prompt ID cannot contain whitespace.");
   }
+  if (/[\x00-\x1f\x7f]/.test(id)) {
+    throw new Error("Prompt ID cannot contain control characters.");
+  }
   if (id === "e") {
     throw new Error("Prompt ID cannot be 'e' because 'e' is reserved for editing/adding prompts.");
+  }
+  if (id === "d") {
+    throw new Error("Prompt ID cannot be 'd' because 'd' is reserved for deleting prompts.");
   }
   if (RESERVED_IDS.has(id)) {
     throw new Error(`Prompt ID '${id}' is reserved.`);
@@ -151,7 +182,7 @@ export function validatePromptId(id) {
  * Get a saved prompt entry by ID, or null if not found.
  */
 export function getPrompt(id, storePath = resolveStorePath()) {
-  if (typeof id !== "string" || !id || RESERVED_IDS.has(id)) {
+  if (typeof id !== "string" || !id || PROTOTYPE_KEYS.has(id)) {
     return null;
   }
   const store = loadStore(storePath);
@@ -191,7 +222,7 @@ export function setPrompt(id, text, storePath = resolveStorePath()) {
  * Delete a saved prompt entry by ID. Returns true if it existed.
  */
 export function deletePrompt(id, storePath = resolveStorePath()) {
-  if (typeof id !== "string" || !id || RESERVED_IDS.has(id)) {
+  if (typeof id !== "string" || !id || PROTOTYPE_KEYS.has(id)) {
     return false;
   }
   const store = loadStore(storePath);
@@ -320,6 +351,28 @@ export function isDirectEntrypoint(importMetaUrl, argvPath = process.argv[1], fi
   }
 }
 
+function validateSlashIdToken(token, allowLegacyCommandId = false) {
+  if (!token || !token.trim()) {
+    return { code: "INVALID_ID", message: "Prompt ID cannot be empty." };
+  }
+  if (/\s/.test(token)) {
+    return { code: "INVALID_ID", message: "Prompt ID cannot contain whitespace." };
+  }
+  if (/[\x00-\x1f\x7f]/.test(token)) {
+    return { code: "INVALID_ID", message: "Prompt ID cannot contain control characters." };
+  }
+  if (PROTOTYPE_KEYS.has(token) || (!allowLegacyCommandId && RESERVED_IDS.has(token))) {
+    let message = `Prompt ID '${token}' is reserved.`;
+    if (token === "e") {
+      message = "Prompt ID cannot be 'e' because 'e' is reserved for editing/adding prompts.";
+    } else if (token === "d") {
+      message = "Prompt ID cannot be 'd' because 'd' is reserved for deleting prompts.";
+    }
+    return { code: "RESERVED_ID", message };
+  }
+  return null;
+}
+
 /**
  * Parse a user slash command starting with /p (or /prompt-manager:p).
  * Returns null if the input is not a /p command.
@@ -351,15 +404,13 @@ export function parseSlashCommand(input) {
         message: "Missing prompt ID and text. Usage: /p e <saved_prompt_ID> <text>",
       };
     }
-    if (RESERVED_IDS.has(idToken.token)) {
+    const idErr = validateSlashIdToken(idToken.token);
+    if (idErr) {
       return {
         action: "error",
-        code: "RESERVED_ID",
+        code: idErr.code,
         id: idToken.token,
-        message:
-          idToken.token === "e"
-            ? "Prompt ID cannot be 'e' because 'e' is reserved for editing/adding prompts."
-            : `Prompt ID '${idToken.token}' is reserved.`,
+        message: idErr.message,
       };
     }
     if (!idToken.rest || !idToken.rest.trim()) {
@@ -383,6 +434,48 @@ export function parseSlashCommand(input) {
       action: "edit",
       id: idToken.token,
       text,
+    };
+  }
+
+  if (first.token === "d") {
+    const idToken = consumeToken(first.rest);
+    if (!idToken) {
+      return {
+        action: "error",
+        code: "MISSING_ID",
+        message: "Missing prompt ID. Usage: /p d <saved_prompt_ID>",
+      };
+    }
+    const idErr = validateSlashIdToken(idToken.token, true);
+    if (idErr) {
+      return {
+        action: "error",
+        code: idErr.code,
+        id: idToken.token,
+        message: idErr.message,
+      };
+    }
+    if (idToken.rest && idToken.rest.trim()) {
+      return {
+        action: "error",
+        code: "UNEXPECTED_ARGS",
+        id: idToken.token,
+        message: `Unexpected extra arguments after ID '${idToken.token}'. Usage: /p d ${idToken.token}`,
+      };
+    }
+    return {
+      action: "delete",
+      id: idToken.token,
+    };
+  }
+
+  const sendErr = validateSlashIdToken(first.token, true);
+  if (sendErr) {
+    return {
+      action: "error",
+      code: sendErr.code,
+      id: first.token,
+      message: sendErr.message,
     };
   }
 

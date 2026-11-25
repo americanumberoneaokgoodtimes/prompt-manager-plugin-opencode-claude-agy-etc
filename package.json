@@ -3,8 +3,15 @@
   "version": "1.0.0",
   "description": "Multi-tool Prompt Manager plugin for Antigravity, Claude Code, and OpenCode (/p <id> and /p e <id> <text>).",
   "type": "module",
+  "bin": {
+    "p": "./scripts/p.mjs"
+  },
   "main": "./opencode/plugin.js",
   "types": "./opencode/plugin.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/americanumberoneaokgoodtimes/prompt-manager-plugin-opencode-claude-agy-etc"
+  },
   "exports": {
     ".": {
       "types": "./opencode/plugin.d.ts",

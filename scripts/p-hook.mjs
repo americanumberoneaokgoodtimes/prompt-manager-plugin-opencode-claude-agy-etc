@@ -27,27 +27,40 @@ export function isFirstInvocationOfTurn(input) {
   }
   try {
     const stat = fs.statSync(transcriptPath);
-    const readBytes = Math.min(stat.size, 65536);
+    if (stat.size === 0) {
+      return false;
+    }
+    const chunkSize = 65536;
+    const maxScanBytes = 1024 * 1024;
+    let offset = stat.size;
+    let scanned = 0;
+    let trailing = "";
     const fd = fs.openSync(transcriptPath, "r");
     try {
-      const buf = Buffer.alloc(readBytes);
-      fs.readSync(fd, buf, 0, readBytes, stat.size - readBytes);
-      const lines = buf.toString("utf8").split(/\r?\n/);
-      // Scan backwards: if we hit USER_INPUT before PLANNER_RESPONSE, no model
-      // response has happened yet for the current user prompt.
-      for (let i = lines.length - 1; i >= 0; i--) {
-        const line = lines[i].trim();
-        if (!line) continue;
-        try {
-          const entry = JSON.parse(line);
-          if (entry.type === "USER_INPUT") {
-            return true;
+      while (offset > 0 && scanned < maxScanBytes) {
+        const readBytes = Math.min(offset, chunkSize);
+        offset -= readBytes;
+        scanned += readBytes;
+        const buf = Buffer.alloc(readBytes);
+        fs.readSync(fd, buf, 0, readBytes, offset);
+        const lines = (buf.toString("utf8") + trailing).split(/\r?\n/);
+        trailing = offset > 0 ? (lines.shift() ?? "") : "";
+        // Scan backwards: if we hit USER_INPUT before PLANNER_RESPONSE, no model
+        // response has happened yet for the current user prompt.
+        for (let i = lines.length - 1; i >= 0; i--) {
+          const line = lines[i].trim();
+          if (!line) continue;
+          try {
+            const entry = JSON.parse(line);
+            if (entry.type === "USER_INPUT") {
+              return true;
+            }
+            if (entry.type === "PLANNER_RESPONSE") {
+              return false;
+            }
+          } catch {
+            // Ignore malformed or partial lines.
           }
-          if (entry.type === "PLANNER_RESPONSE") {
-            return false;
-          }
-        } catch {
-          // Ignore partial first line when reading from a tail offset.
         }
       }
     } finally {
@@ -59,7 +72,7 @@ export function isFirstInvocationOfTurn(input) {
   return false;
 }
 
-function toAntigravityResponse(result) {
+export function toAntigravityResponse(result) {
   const injectSteps = [
     {
       systemMessage: {

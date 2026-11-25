@@ -1,18 +1,20 @@
 import readline from "node:readline";
+import { fileURLToPath } from "node:url";
 import {
   deletePrompt,
   getPrompt,
+  isDirectEntrypoint,
   listPrompts,
   resolveStorePath,
   setPrompt,
 } from "./store.mjs";
 
-const SERVER_INFO = {
+export const SERVER_INFO = {
   name: "prompt-manager",
   version: "1.0.0",
 };
 
-const TOOLS = [
+export const TOOLS = [
   {
     name: "list_prompts",
     description: "List all saved prompts with their IDs, text, and timestamps.",
@@ -45,7 +47,7 @@ const TOOLS = [
       properties: {
         id: {
           type: "string",
-          description: "The prompt ID (cannot contain whitespace or be 'e').",
+          description: "The prompt ID (cannot contain whitespace or be 'e' or 'd').",
         },
         text: {
           type: "string",
@@ -91,9 +93,8 @@ function textResult(text, isError = false) {
     : { content: [{ type: "text", text }] };
 }
 
-function handleToolCall(name, args) {
+export function handleToolCall(name, args, storePath = resolveStorePath()) {
   const safeArgs = args && typeof args === "object" && !Array.isArray(args) ? args : {};
-  const storePath = resolveStorePath();
   switch (name) {
     case "list_prompts": {
       const entries = listPrompts(storePath);
@@ -110,6 +111,12 @@ function handleToolCall(name, args) {
       return textResult(JSON.stringify(entry, null, 2));
     }
     case "save_prompt": {
+      if (typeof safeArgs.id !== "string" || !safeArgs.id.trim()) {
+        return textResult("Missing required string parameter 'id'.", true);
+      }
+      if (typeof safeArgs.text !== "string" || !safeArgs.text.trim()) {
+        return textResult("Missing required string parameter 'text'.", true);
+      }
       const saved = setPrompt(safeArgs.id, safeArgs.text, storePath);
       return textResult(JSON.stringify(saved, null, 2));
     }
@@ -128,7 +135,7 @@ function handleToolCall(name, args) {
   }
 }
 
-function handleMessage(msg) {
+export function handleMessage(msg, storePath = resolveStorePath(), sendFn = send) {
   if (!msg || typeof msg !== "object") {
     return;
   }
@@ -141,47 +148,59 @@ function handleMessage(msg) {
 
   switch (method) {
     case "initialize":
-      sendResult(id, {
-        protocolVersion: params?.protocolVersion || "2024-11-05",
-        capabilities: {
-          tools: {},
+      sendFn({
+        jsonrpc: "2.0",
+        id,
+        result: {
+          protocolVersion: params?.protocolVersion || "2024-11-05",
+          capabilities: {
+            tools: {},
+          },
+          serverInfo: SERVER_INFO,
         },
-        serverInfo: SERVER_INFO,
       });
       return;
     case "ping":
-      sendResult(id, {});
+      sendFn({ jsonrpc: "2.0", id, result: {} });
       return;
     case "tools/list":
-      sendResult(id, { tools: TOOLS });
+      sendFn({ jsonrpc: "2.0", id, result: { tools: TOOLS } });
       return;
     case "tools/call":
       try {
-        const result = handleToolCall(params?.name, params?.arguments);
-        sendResult(id, result);
+        const result = handleToolCall(params?.name, params?.arguments, storePath);
+        sendFn({ jsonrpc: "2.0", id, result });
       } catch (err) {
-        sendResult(id, textResult(err?.message || String(err), true));
+        sendFn({ jsonrpc: "2.0", id, result: textResult(err?.message || String(err), true) });
       }
       return;
     default:
-      sendError(id, -32601, `Method not found: ${method}`);
+      sendFn({ jsonrpc: "2.0", id, error: { code: -32601, message: `Method not found: ${method}` } });
   }
 }
 
-const rl = readline.createInterface({
-  input: process.stdin,
-  crlfDelay: Infinity,
-});
+if (isDirectEntrypoint(import.meta.url, process.argv[1], fileURLToPath)) {
+  process.stdout.on("error", (err) => {
+    if (err?.code === "EPIPE") {
+      process.exit(0);
+    }
+  });
 
-rl.on("line", (line) => {
-  const trimmed = line.trim();
-  if (!trimmed) {
-    return;
-  }
-  try {
-    const msg = JSON.parse(trimmed);
-    handleMessage(msg);
-  } catch (err) {
-    sendError(null, -32700, `Parse error: ${err?.message || String(err)}`);
-  }
-});
+  const rl = readline.createInterface({
+    input: process.stdin,
+    crlfDelay: Infinity,
+  });
+
+  rl.on("line", (line) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      return;
+    }
+    try {
+      const msg = JSON.parse(trimmed);
+      handleMessage(msg);
+    } catch (err) {
+      sendError(null, -32700, `Parse error: ${err?.message || String(err)}`);
+    }
+  });
+}

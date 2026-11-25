@@ -1,6 +1,10 @@
+#!/usr/bin/env node
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   deletePrompt,
   getPrompt,
+  isDirectEntrypoint,
   listPrompts,
   resolveStorePath,
   setPrompt,
@@ -10,10 +14,11 @@ function printHelp() {
   process.stdout.write(
     [
       "Usage:",
-      "  node scripts/p.mjs list",
-      "  node scripts/p.mjs get <id>",
-      "  node scripts/p.mjs set <id> <text>",
+      "  node scripts/p.mjs list [--json]",
+      "  node scripts/p.mjs get <id> [--json]",
+      "  node scripts/p.mjs set <id> <text>       (or pipe stdin / pass --stdin)",
       "  node scripts/p.mjs delete <id>",
+      "  node scripts/p.mjs path",
       "",
       `Store: ${resolveStorePath()}`,
       "",
@@ -21,15 +26,34 @@ function printHelp() {
   );
 }
 
-function main() {
-  const [, , subcommand, id, ...rest] = process.argv;
-  if (!subcommand || subcommand === "-h" || subcommand === "--help") {
+function readStdinSafe() {
+  try {
+    return fs.readFileSync(0, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+function runCli(argv = process.argv) {
+  const [, , subcommand, ...args] = argv;
+  if (!subcommand || subcommand === "-h" || subcommand === "--help" || subcommand === "help") {
     printHelp();
     return;
   }
 
+  if (subcommand === "path") {
+    process.stdout.write(resolveStorePath() + "\n");
+    return;
+  }
+
   if (subcommand === "list") {
-    const entries = listPrompts();
+    const asJson = args.includes("--json");
+    const storePath = resolveStorePath();
+    const entries = listPrompts(storePath);
+    if (asJson) {
+      process.stdout.write(JSON.stringify({ storePath, prompts: entries }, null, 2) + "\n");
+      return;
+    }
     if (entries.length === 0) {
       process.stdout.write("No saved prompts.\n");
       return;
@@ -41,6 +65,8 @@ function main() {
   }
 
   if (subcommand === "get") {
+    const asJson = args.includes("--json");
+    const id = args.find((a) => a !== "--json");
     if (!id) {
       process.stderr.write("Missing prompt ID.\n");
       process.exitCode = 1;
@@ -52,17 +78,30 @@ function main() {
       process.exitCode = 1;
       return;
     }
+    if (asJson) {
+      process.stdout.write(JSON.stringify(entry, null, 2) + "\n");
+      return;
+    }
     process.stdout.write(entry.text + "\n");
     return;
   }
 
   if (subcommand === "set") {
-    if (!id || rest.length === 0) {
+    const [id, ...rest] = args;
+    let text = "";
+    if (rest.length === 1 && (rest[0] === "--stdin" || rest[0] === "-")) {
+      text = readStdinSafe().replace(/\r?\n$/, "");
+    } else if (rest.length === 0 && !process.stdin.isTTY) {
+      text = readStdinSafe().replace(/\r?\n$/, "");
+    } else {
+      text = rest.join(" ");
+    }
+
+    if (!id || !text.trim()) {
       process.stderr.write("Usage: node scripts/p.mjs set <id> <text>\n");
       process.exitCode = 1;
       return;
     }
-    const text = rest.join(" ");
     const saved = setPrompt(id, text);
     process.stdout.write(
       `${saved.created ? "Saved" : "Updated"} prompt '${saved.id}' (${saved.text.length} chars).\n`,
@@ -71,6 +110,7 @@ function main() {
   }
 
   if (subcommand === "delete") {
+    const [id] = args;
     if (!id) {
       process.stderr.write("Missing prompt ID.\n");
       process.exitCode = 1;
@@ -91,4 +131,11 @@ function main() {
   process.exitCode = 1;
 }
 
-main();
+if (isDirectEntrypoint(import.meta.url, process.argv[1], fileURLToPath)) {
+  try {
+    runCli(process.argv);
+  } catch (err) {
+    process.stderr.write(`Error: ${err?.message || err}\n`);
+    process.exitCode = 1;
+  }
+}

@@ -8,10 +8,15 @@ import {
   deletePrompt,
   getPrompt,
   listPrompts,
+  loadStore,
   parseSlashCommand,
+  resolveStorePath,
   setPrompt,
   unwrapQuotes,
 } from "./store.mjs";
+import { executePromptCommand } from "./handler.mjs";
+import { isFirstInvocationOfTurn } from "./p-hook.mjs";
+import { handleMessage } from "./mcp-server.mjs";
 import { PromptManagerPlugin } from "../opencode/plugin.js";
 
 const PLUGIN_ROOT = path.resolve(import.meta.dirname, "..");
@@ -70,6 +75,13 @@ test("parseSlashCommand handles edit, send, list, and non-/p inputs", () => {
   assert.equal(parseSlashCommand("/p e").action, "error");
   assert.equal(parseSlashCommand("/p e 1").code, "MISSING_TEXT");
   assert.equal(parseSlashCommand("/p e e hello").code, "RESERVED_ID");
+  assert.equal(parseSlashCommand("/p e d hello").code, "RESERVED_ID");
+  assert.equal(parseSlashCommand('/p e "my id" hello').code, "INVALID_ID");
+  assert.equal(parseSlashCommand('/p e "" hello').code, "INVALID_ID");
+  assert.equal(parseSlashCommand('/p ""').code, "INVALID_ID");
+  assert.deepEqual(parseSlashCommand("/p d 1"), { action: "delete", id: "1" });
+  assert.equal(parseSlashCommand("/p d").code, "MISSING_ID");
+  assert.equal(parseSlashCommand("/p d 1 2").code, "UNEXPECTED_ARGS");
   assert.equal(parseSlashCommand("/plan refactor auth"), null);
   assert.equal(parseSlashCommand("regular message"), null);
 });
@@ -415,6 +427,197 @@ test("p.mjs CLI supports set, get, list, and delete preserving literal text", ()
     });
     assert.equal(delRes.status, 0);
     assert.match(delRes.stdout, /Deleted prompt '1'/);
+
+    // Pipe stdin + --json + path + clean validation error
+    const stdinSet = spawnSync("node", ["./scripts/p.mjs", "set", "2", "--stdin"], {
+      cwd: PLUGIN_ROOT,
+      env,
+      input: "line one\nline two\n",
+      encoding: "utf8",
+    });
+    assert.equal(stdinSet.status, 0);
+    assert.match(stdinSet.stdout, /Saved prompt '2'/);
+
+    const listJsonRes = spawnSync("node", ["./scripts/p.mjs", "list", "--json"], {
+      cwd: PLUGIN_ROOT,
+      env,
+      encoding: "utf8",
+    });
+    assert.equal(listJsonRes.status, 0);
+    const listParsed = JSON.parse(listJsonRes.stdout);
+    assert.equal(listParsed.prompts.length, 1);
+    assert.equal(listParsed.prompts[0].text, "line one\nline two");
+
+    const getJsonRes = spawnSync("node", ["./scripts/p.mjs", "get", "2", "--json"], {
+      cwd: PLUGIN_ROOT,
+      env,
+      encoding: "utf8",
+    });
+    assert.equal(getJsonRes.status, 0);
+    assert.equal(JSON.parse(getJsonRes.stdout).id, "2");
+
+    const pathRes = spawnSync("node", ["./scripts/p.mjs", "path"], {
+      cwd: PLUGIN_ROOT,
+      env,
+      encoding: "utf8",
+    });
+    assert.equal(pathRes.status, 0);
+    assert.equal(pathRes.stdout.trim(), path.resolve(storePath));
+
+    const badSetRes = spawnSync("node", ["./scripts/p.mjs", "set", "d", "bad"], {
+      cwd: PLUGIN_ROOT,
+      env,
+      encoding: "utf8",
+    });
+    assert.equal(badSetRes.status, 1);
+    assert.match(badSetRes.stderr, /^Error: Prompt ID cannot be 'd'/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("store handles null prompts, malformed JSON, legacy keys, and ~/ expansion", () => {
+  const { dir, storePath } = makeTempStore();
+  const prevEnv = process.env.PROMPT_MANAGER_STORE_PATH;
+  try {
+    fs.writeFileSync(storePath, JSON.stringify({ version: 1, prompts: null }), "utf8");
+    assert.throws(() => loadStore(storePath), /Invalid prompt store format/);
+
+    fs.writeFileSync(storePath, "{not valid json", "utf8");
+    assert.throws(() => loadStore(storePath), /Failed to parse prompt store/);
+
+    fs.writeFileSync(
+      storePath,
+      JSON.stringify({ version: 1, prompts: { d: "legacy", __proto__: "bad" } }),
+      "utf8",
+    );
+    const loaded = loadStore(storePath);
+    assert.equal(loaded.prompts.d.text, "legacy");
+    assert.equal(Object.hasOwn(loaded.prompts, "__proto__"), false);
+    assert.throws(() => setPrompt("d", "new", storePath), /reserved/);
+
+    process.env.PROMPT_MANAGER_STORE_PATH = "~/custom-prompts/prompts.json";
+    assert.equal(
+      resolveStorePath(),
+      path.resolve(path.join(os.homedir(), "custom-prompts", "prompts.json")),
+    );
+  } finally {
+    if (prevEnv === undefined) {
+      delete process.env.PROMPT_MANAGER_STORE_PATH;
+    } else {
+      process.env.PROMPT_MANAGER_STORE_PATH = prevEnv;
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("executePromptCommand handles inspect, delete, fence escaping, and store errors", () => {
+  const { dir, storePath } = makeTempStore();
+  try {
+    setPrompt("1", "Use ```js\nconsole.log(1)\n``` safely", storePath);
+    const inspectFound = executePromptCommand("/p e 1", storePath);
+    assert.equal(inspectFound.action, "inspect");
+    assert.equal(inspectFound.found, true);
+    assert.match(inspectFound.systemInstruction, /````\nUse ```js/);
+
+    const inspectMissing = executePromptCommand("/p e missing", storePath);
+    assert.equal(inspectMissing.action, "error");
+    assert.equal(inspectMissing.code, "MISSING_TEXT");
+
+    const delFound = executePromptCommand("/p d 1", storePath);
+    assert.equal(delFound.action, "delete");
+    assert.equal(delFound.deleted, true);
+    assert.equal(getPrompt("1", storePath), null);
+
+    const delMissing = executePromptCommand("/p d 1", storePath);
+    assert.equal(delMissing.action, "delete");
+    assert.equal(delMissing.deleted, false);
+
+    fs.writeFileSync(storePath, "{corrupt", "utf8");
+    const storeErr = executePromptCommand("/p 1", storePath);
+    assert.equal(storeErr.action, "error");
+    assert.equal(storeErr.code, "STORE_ERROR");
+    assert.match(storeErr.systemInstruction, /Failed to parse prompt store/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("isFirstInvocationOfTurn scans across >64KB tool output chunks", () => {
+  const { dir } = makeTempStore();
+  const transcriptPath = path.join(dir, "big-transcript.jsonl");
+  try {
+    const bigPayload = "x".repeat(80 * 1024);
+    fs.writeFileSync(
+      transcriptPath,
+      [
+        JSON.stringify({ step_index: 0, type: "USER_INPUT", content: "/p 1" }),
+        JSON.stringify({ step_index: 1, type: "PLANNER_RESPONSE", content: "calling tool" }),
+        JSON.stringify({ step_index: 2, type: "GENERIC", content: bigPayload }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+    assert.equal(isFirstInvocationOfTurn({ invocationNum: 2, transcriptPath }), false);
+
+    fs.appendFileSync(
+      transcriptPath,
+      JSON.stringify({ step_index: 3, type: "USER_INPUT", content: bigPayload }) + "\n",
+      "utf8",
+    );
+    assert.equal(isFirstInvocationOfTurn({ invocationNum: 3, transcriptPath }), true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("OpenCode plugin normalizes leading slash, handles missing sessionID, and supports /p d", async () => {
+  const { dir, storePath } = makeTempStore();
+  const prevStore = process.env.PROMPT_MANAGER_STORE_PATH;
+  process.env.PROMPT_MANAGER_STORE_PATH = storePath;
+  try {
+    const hooks = await PromptManagerPlugin({});
+    setPrompt("nested", "/p 1", storePath);
+    setPrompt("1", "one", storePath);
+
+    const outNoSession = { parts: [{ type: "text", text: "/p nested" }] };
+    await hooks["command.execute.before"](
+      { command: "/p", arguments: "nested" },
+      outNoSession,
+    );
+    assert.equal(outNoSession.parts[0].text, "/p 1");
+    await hooks["chat.message"]({}, outNoSession);
+    assert.equal(outNoSession.parts[0].text, "/p 1");
+
+    const delOut = { parts: [{ type: "text", text: "/p d 1" }] };
+    await hooks["command.execute.before"]({ command: "p", arguments: "d 1" }, delOut);
+    assert.match(delOut.parts[0].text, /Deleted prompt ID '1'/);
+    assert.equal(getPrompt("1", storePath), null);
+  } finally {
+    if (prevStore === undefined) {
+      delete process.env.PROMPT_MANAGER_STORE_PATH;
+    } else {
+      process.env.PROMPT_MANAGER_STORE_PATH = prevStore;
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("mcp-server handleMessage handles ping, validation errors, and unknown methods", () => {
+  const { dir, storePath } = makeTempStore();
+  try {
+    const sent = [];
+    const sendFn = (msg) => sent.push(msg);
+    handleMessage({ jsonrpc: "2.0", id: 1, method: "ping" }, storePath, sendFn);
+    handleMessage(
+      { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "save_prompt", arguments: { id: "1" } } },
+      storePath,
+      sendFn,
+    );
+    handleMessage({ jsonrpc: "2.0", id: 3, method: "unknown/method" }, storePath, sendFn);
+    assert.deepEqual(sent[0], { jsonrpc: "2.0", id: 1, result: {} });
+    assert.equal(sent[1].result.isError, true);
+    assert.match(sent[1].result.content[0].text, /Missing required string parameter 'text'/);
+    assert.equal(sent[2].error.code, -32601);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
