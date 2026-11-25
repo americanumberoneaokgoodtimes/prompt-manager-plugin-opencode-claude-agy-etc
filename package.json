@@ -1,17 +1,27 @@
 {
-  "name": "agy-plugin-p",
+  "name": "p-plugin",
   "version": "1.0.0",
-  "description": "Multi-tool Prompt Manager plugin for Antigravity, Claude Code, and OpenCode (/p <id> and /p e <id> <text>).",
+  "description": "Multi-tool Prompt Manager plugin for Antigravity, Claude Code, and OpenCode (/p <id>, /p e <id> <text>, /p d <id>).",
   "type": "module",
   "bin": {
     "p": "./scripts/p.mjs"
   },
   "main": "./opencode/plugin.js",
   "types": "./opencode/plugin.d.ts",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/americanumberoneaokgoodtimes/prompt-manager-plugin-opencode-claude-agy-etc"
-  },
+  "files": [
+    "opencode",
+    "scripts",
+    "skills",
+    "assets",
+    "hooks",
+    "hooks.json",
+    "mcp_config.json",
+    ".mcp.json",
+    ".antigravity-plugin",
+    ".claude-plugin",
+    "plugin.json",
+    "README.md"
+  ],
   "exports": {
     ".": {
       "types": "./opencode/plugin.d.ts",
@@ -22,6 +32,10 @@
       "default": "./opencode/plugin.js"
     }
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/americanumberoneaokgoodtimes/prompt-manager-plugin-opencode-claude-agy-etc"
+  },
   "license": "MIT",
   "engines": {
     "node": ">=18"
@@ -30,11 +44,13 @@
     "test": "node --test scripts/prompt-manager.test.mjs"
   },
   "keywords": [
+    "opencode",
+    "opencode-plugin",
     "antigravity",
     "claude-code",
-    "opencode",
     "plugin",
     "prompts",
+    "prompt-manager",
     "mcp"
   ]
 }

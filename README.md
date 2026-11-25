@@ -105,7 +105,26 @@ claude --plugin-dir /path/to/agy-plugin-p
 
 This repository exports the OpenCode plugin from `package.json` and `opencode/plugin.js`, registering `/p`, `command.execute.before`, `chat.message`, and the local `prompt-manager` MCP server automatically.
 
-#### Option 1: Reference the local repository in `opencode.json`
+#### Option 1: Install via `opencode plugin add` (recommended)
+
+```bash
+opencode plugin add p-plugin
+```
+
+#### Option 2: Reference in `opencode.json`
+
+Add `p-plugin` to `~/.config/opencode/opencode.json` (global) or `./opencode.json` (project):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    "p-plugin"
+  ]
+}
+```
+
+#### Option 3: Reference local file path URL
 
 Add the plugin file URL to `~/.config/opencode/opencode.json` (global) or `./opencode.json` (project):
 
@@ -127,17 +146,6 @@ Windows:
   "$schema": "https://opencode.ai/config.json",
   "plugin": [
     "file:///C:/path/to/agy-plugin-p/opencode/plugin.js"
-  ]
-}
-```
-
-#### Option 2: Install via npm package name (if published)
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugin": [
-    "agy-plugin-p"
   ]
 }
 ```
