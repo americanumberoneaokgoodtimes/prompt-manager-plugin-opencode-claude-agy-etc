@@ -3,6 +3,17 @@ import { fileURLToPath } from "node:url";
 import { executePromptCommand } from "../scripts/handler.mjs";
 import { resolveStorePath } from "../scripts/store.mjs";
 
+let opencodePluginSdk = null;
+try {
+  opencodePluginSdk = await import("@opencode/plugin");
+} catch {
+  // Runtime host does not supply @opencode/plugin or running in standalone/test environment
+}
+
+const Plugin = opencodePluginSdk?.Plugin || {
+  define: (def) => def,
+};
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MCP_SERVER_PATH = path.resolve(__dirname, "..", "scripts", "mcp-server.mjs");
 
@@ -138,19 +149,25 @@ export const PromptManagerPlugin = async (ctx) => {
 };
 
 /**
- * OpenCode v2 definition object.
- * OpenCode v2 requires the default export to be an object with an `id` string
- * and a `setup` (or `effect`) function:
- * Schema.Union([
- *   Schema.Struct({ id: Schema.String, setup: Schema.Function }),
- *   Schema.Struct({ id: Schema.String, effect: Schema.Function })
- * ])
+ * OpenCode dual-compatibility plugin definition supporting both V1 and V2.
+ * Based on OpenCode V1 to V2 migration guide: https://opencode.ai/docs/build/plugins/migrate-v1/
+ *
+ * - V2 loader looks for: `id` and `setup(ctx)` (created via Plugin.define)
+ * - V1 loader looks for: `server(ctx)` (or direct function invocation / hook object)
  */
 export const plugin = {
-  id: "@americanumberoneaokgoodtimes/p-plugin",
-  name: "prompt-manager",
-  description: "Prompt Manager plugin for OpenCode (/p)",
-  setup: async (ctx) => {
+  // --- V2 Loader looks for this ---
+  ...Plugin.define({
+    id: "@americanumberoneaokgoodtimes/p-plugin",
+    name: "prompt-manager",
+    description: "Prompt Manager plugin for OpenCode (/p)",
+    setup: async (ctx) => {
+      return await createPromptManagerHooks(ctx);
+    },
+  }),
+
+  // --- V1 Loader looks for this ---
+  async server(ctx) {
     return await createPromptManagerHooks(ctx);
   },
 };

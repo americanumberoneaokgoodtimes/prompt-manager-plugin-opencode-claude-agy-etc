@@ -574,12 +574,17 @@ test("OpenCode plugin exports support both v2 plugin definition and v1 function"
   assert.equal(typeof defaultPlugin, "object");
   assert.equal(defaultPlugin.id, "@americanumberoneaokgoodtimes/p-plugin");
   assert.equal(typeof defaultPlugin.setup, "function");
+  assert.equal(typeof defaultPlugin.server, "function");
   assert.equal(defaultPlugin, plugin);
 
   const hooksFromSetup = await defaultPlugin.setup({});
   assert.equal(typeof hooksFromSetup["command.execute.before"], "function");
   assert.equal(typeof hooksFromSetup["chat.message"], "function");
   assert.equal(typeof hooksFromSetup.config, "function");
+
+  const hooksFromServer = await defaultPlugin.server({});
+  assert.equal(typeof hooksFromServer["command.execute.before"], "function");
+  assert.equal(typeof hooksFromServer["chat.message"], "function");
 
   const hooksFromV1 = await PromptManagerPlugin({});
   assert.equal(typeof hooksFromV1["command.execute.before"], "function");

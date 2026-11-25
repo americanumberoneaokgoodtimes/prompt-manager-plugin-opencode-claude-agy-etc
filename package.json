@@ -1,7 +1,8 @@
 {
+  "$schema": "https://json.schemastore.org/package.json",
   "name": "@americanumberoneaokgoodtimes/p-plugin",
-  "version": "1.0.1",
-  "description": "Multi-tool Prompt Manager plugin for Antigravity, Claude Code, and OpenCode (/p <id>, /p e <id> <text>, /p d <id>).",
+  "version": "1.0.3",
+  "description": "Simple prompt saver, agent harness CLI instruction template manager, plugin for Antigravity, Claude Code, and OpenCode (Usage: /p <name> sends your saved instruction, /p e <name> {instruction_text} saves your prompt, /p d <name> deletes it. Example: /p e fix \"fix any buggy\" [ENTER->] /p fix [ENTER->] Reticulating Tokenizer...Got them buggies!).",
   "type": "module",
   "publishConfig": {
     "access": "public"
@@ -28,10 +29,12 @@
   "exports": {
     ".": {
       "types": "./opencode/plugin.d.ts",
+      "import": "./opencode/plugin.js",
       "default": "./opencode/plugin.js"
     },
     "./opencode": {
       "types": "./opencode/plugin.d.ts",
+      "import": "./opencode/plugin.js",
       "default": "./opencode/plugin.js"
     }
   },
@@ -46,9 +49,21 @@
   "scripts": {
     "test": "node --test scripts/prompt-manager.test.mjs"
   },
+  "peerDependencies": {
+    "@opencode/plugin": ">=2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@opencode/plugin": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@opencode/plugin": "^2.4.1"
+  },
   "keywords": [
     "opencode",
     "opencode-plugin",
+    "opencode-v2",
     "antigravity",
     "claude-code",
     "plugin",

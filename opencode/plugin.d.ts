@@ -1,3 +1,5 @@
+import type { Plugin as OpenCodePlugin } from "@opencode/plugin";
+
 export interface PromptManagerPluginHooks {
   config: (config: Record<string, any>) => Promise<void>;
   "command.execute.before": (
@@ -13,12 +15,13 @@ export interface PromptManagerPluginHooks {
 export declare const createPromptManagerHooks: (ctx: unknown) => Promise<PromptManagerPluginHooks>;
 export declare const PromptManagerPlugin: (ctx: unknown) => Promise<PromptManagerPluginHooks>;
 
-export interface OpenCodePluginDefinition {
+export interface DualOpenCodePluginDefinition {
   id: string;
   name?: string;
   description?: string;
   setup: (ctx: unknown) => Promise<PromptManagerPluginHooks>;
+  server: (ctx?: unknown) => Promise<PromptManagerPluginHooks>;
 }
 
-export declare const plugin: OpenCodePluginDefinition;
+export declare const plugin: DualOpenCodePluginDefinition;
 export default plugin;
