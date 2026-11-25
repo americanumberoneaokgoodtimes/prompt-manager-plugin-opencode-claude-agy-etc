@@ -45,9 +45,9 @@ function replacementForResult(result) {
 }
 
 /**
- * OpenCode plugin entrypoint compatible with `.opencode/plugins/` and `opencode.json`.
+ * OpenCode plugin hook factory.
  */
-export const PromptManagerPlugin = async (_ctx) => {
+export const createPromptManagerHooks = async (_ctx) => {
   const recentlyHandled = new Map();
   const DEDUP_TTL_MS = 5000;
 
@@ -130,4 +130,29 @@ export const PromptManagerPlugin = async (_ctx) => {
   };
 };
 
-export default PromptManagerPlugin;
+/**
+ * OpenCode v1 function-style plugin entrypoint.
+ */
+export const PromptManagerPlugin = async (ctx) => {
+  return await createPromptManagerHooks(ctx);
+};
+
+/**
+ * OpenCode v2 definition object.
+ * OpenCode v2 requires the default export to be an object with an `id` string
+ * and a `setup` (or `effect`) function:
+ * Schema.Union([
+ *   Schema.Struct({ id: Schema.String, setup: Schema.Function }),
+ *   Schema.Struct({ id: Schema.String, effect: Schema.Function })
+ * ])
+ */
+export const plugin = {
+  id: "@americanumberoneaokgoodtimes/p-plugin",
+  name: "prompt-manager",
+  description: "Prompt Manager plugin for OpenCode (/p)",
+  setup: async (ctx) => {
+    return await createPromptManagerHooks(ctx);
+  },
+};
+
+export default plugin;

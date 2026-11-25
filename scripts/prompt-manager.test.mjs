@@ -17,7 +17,7 @@ import {
 import { executePromptCommand } from "./handler.mjs";
 import { isFirstInvocationOfTurn } from "./p-hook.mjs";
 import { handleMessage } from "./mcp-server.mjs";
-import { PromptManagerPlugin } from "../opencode/plugin.js";
+import defaultPlugin, { plugin, PromptManagerPlugin, createPromptManagerHooks } from "../opencode/plugin.js";
 
 const PLUGIN_ROOT = path.resolve(import.meta.dirname, "..");
 
@@ -568,6 +568,24 @@ test("isFirstInvocationOfTurn scans across >64KB tool output chunks", () => {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("OpenCode plugin exports support both v2 plugin definition and v1 function", async () => {
+  assert.equal(typeof defaultPlugin, "object");
+  assert.equal(defaultPlugin.id, "@americanumberoneaokgoodtimes/p-plugin");
+  assert.equal(typeof defaultPlugin.setup, "function");
+  assert.equal(defaultPlugin, plugin);
+
+  const hooksFromSetup = await defaultPlugin.setup({});
+  assert.equal(typeof hooksFromSetup["command.execute.before"], "function");
+  assert.equal(typeof hooksFromSetup["chat.message"], "function");
+  assert.equal(typeof hooksFromSetup.config, "function");
+
+  const hooksFromV1 = await PromptManagerPlugin({});
+  assert.equal(typeof hooksFromV1["command.execute.before"], "function");
+
+  const hooksFromFactory = await createPromptManagerHooks({});
+  assert.equal(typeof hooksFromFactory["command.execute.before"], "function");
 });
 
 test("OpenCode plugin normalizes leading slash, handles missing sessionID, and supports /p d", async () => {
