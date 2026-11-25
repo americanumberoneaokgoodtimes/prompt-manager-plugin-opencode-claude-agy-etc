@@ -1,8 +1,11 @@
 {
-  "name": "p-plugin",
+  "name": "@americanumberoneaokgoodtimes/p-plugin",
   "version": "1.0.0",
   "description": "Multi-tool Prompt Manager plugin for Antigravity, Claude Code, and OpenCode (/p <id>, /p e <id> <text>, /p d <id>).",
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "p": "./scripts/p.mjs"
   },

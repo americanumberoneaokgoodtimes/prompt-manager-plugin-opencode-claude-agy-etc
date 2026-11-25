@@ -108,18 +108,18 @@ This repository exports the OpenCode plugin from `package.json` and `opencode/pl
 #### Option 1: Install via `opencode plugin add` (recommended)
 
 ```bash
-opencode plugin add p-plugin
+opencode plugin add @americanumberoneaokgoodtimes/p-plugin
 ```
 
 #### Option 2: Reference in `opencode.json`
 
-Add `p-plugin` to `~/.config/opencode/opencode.json` (global) or `./opencode.json` (project):
+Add `@americanumberoneaokgoodtimes/p-plugin` to `~/.config/opencode/opencode.json` (global) or `./opencode.json` (project):
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
   "plugin": [
-    "p-plugin"
+    "@americanumberoneaokgoodtimes/p-plugin"
   ]
 }
 ```
