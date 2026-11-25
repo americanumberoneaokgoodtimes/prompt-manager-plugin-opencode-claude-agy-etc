@@ -1,0 +1,123 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { executePromptCommand } from "../scripts/handler.mjs";
+import { resolveStorePath } from "../scripts/store.mjs";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const MCP_SERVER_PATH = path.resolve(__dirname, "..", "scripts", "mcp-server.mjs");
+
+function extractTextFromParts(parts) {
+  if (!Array.isArray(parts)) {
+    return "";
+  }
+  return parts
+    .filter((p) => p && p.type === "text" && typeof p.text === "string")
+    .map((p) => p.text)
+    .join("\n");
+}
+
+function replaceTextInParts(parts, newText) {
+  if (!Array.isArray(parts) || parts.length === 0) {
+    return [{ type: "text", text: newText }];
+  }
+  const firstTextIdx = parts.findIndex((p) => p && p.type === "text");
+  if (firstTextIdx === -1) {
+    return [{ type: "text", text: newText }, ...parts];
+  }
+  const updatedFirst = { ...parts[firstTextIdx], type: "text", text: newText };
+  const nextParts = [];
+  for (let i = 0; i < parts.length; i++) {
+    if (i === firstTextIdx) {
+      nextParts.push(updatedFirst);
+    } else if (parts[i]?.type !== "text") {
+      // Keep non-text attachments while dropping redundant text fragments.
+      nextParts.push(parts[i]);
+    }
+  }
+  return nextParts;
+}
+
+function replacementForResult(result) {
+  if (result.action === "send" && result.found) {
+    return result.resolvedInstruction;
+  }
+  return `[Prompt Manager]\n${result.systemInstruction}`;
+}
+
+/**
+ * OpenCode plugin entrypoint compatible with `.opencode/plugins/` and `opencode.json`.
+ */
+export const PromptManagerPlugin = async (_ctx) => {
+  const recentlyHandled = new Map();
+
+  function markHandled(sessionID, text) {
+    if (!sessionID) return;
+    recentlyHandled.set(sessionID, { text, at: Date.now() });
+  }
+
+  function wasJustHandled(sessionID, text) {
+    if (!sessionID) return false;
+    const entry = recentlyHandled.get(sessionID);
+    if (!entry) return false;
+    if (Date.now() - entry.at > 5000) {
+      recentlyHandled.delete(sessionID);
+      return false;
+    }
+    if (entry.text === text) {
+      recentlyHandled.delete(sessionID);
+      return true;
+    }
+    return false;
+  }
+
+  return {
+    config: async (config) => {
+      config.command = config.command || {};
+      if (!config.command.p) {
+        config.command.p = {
+          description: "Save, edit, list, or send reusable prompts (/p <id> or /p e <id> <text>)",
+          template: "/p $ARGUMENTS",
+        };
+      }
+      config.mcp = config.mcp || {};
+      if (!config.mcp["prompt-manager"]) {
+        config.mcp["prompt-manager"] = {
+          type: "local",
+          command: ["node", MCP_SERVER_PATH],
+        };
+      }
+    },
+
+    "command.execute.before": async (input, output) => {
+      if (!input || (input.command !== "p" && input.command !== "prompt-manager:p")) {
+        return;
+      }
+      const args = typeof input.arguments === "string" ? input.arguments.trim() : "";
+      const rawCommand = args ? `/p ${args}` : "/p";
+      const result = executePromptCommand(rawCommand, resolveStorePath());
+      if (!result) {
+        return;
+      }
+      const replacement = replacementForResult(result);
+      output.parts = replaceTextInParts(output.parts, replacement);
+      markHandled(input.sessionID, replacement);
+    },
+
+    "chat.message": async (input, output) => {
+      if (!output || !Array.isArray(output.parts)) {
+        return;
+      }
+      const text = extractTextFromParts(output.parts);
+      if (wasJustHandled(input?.sessionID, text)) {
+        return;
+      }
+      const result = executePromptCommand(text, resolveStorePath());
+      if (!result) {
+        return;
+      }
+      output.parts = replaceTextInParts(output.parts, replacementForResult(result));
+    },
+  };
+};
+
+export default PromptManagerPlugin;

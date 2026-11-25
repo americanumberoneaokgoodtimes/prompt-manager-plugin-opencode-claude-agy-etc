@@ -1,0 +1,33 @@
+{
+  "name": "agy-plugin-p",
+  "version": "1.0.0",
+  "description": "Multi-tool Prompt Manager plugin for Antigravity, Claude Code, and OpenCode (/p <id> and /p e <id> <text>).",
+  "type": "module",
+  "main": "./opencode/plugin.js",
+  "types": "./opencode/plugin.d.ts",
+  "exports": {
+    ".": {
+      "types": "./opencode/plugin.d.ts",
+      "default": "./opencode/plugin.js"
+    },
+    "./opencode": {
+      "types": "./opencode/plugin.d.ts",
+      "default": "./opencode/plugin.js"
+    }
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test scripts/prompt-manager.test.mjs"
+  },
+  "keywords": [
+    "antigravity",
+    "claude-code",
+    "opencode",
+    "plugin",
+    "prompts",
+    "mcp"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "prompt-manager": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "node ./scripts/p-hook.mjs",
+        "timeout": 10
+      }
+    ]
+  }
+}

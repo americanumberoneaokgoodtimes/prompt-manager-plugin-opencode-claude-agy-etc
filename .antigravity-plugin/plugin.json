@@ -1,0 +1,22 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "prompt-manager",
+  "displayName": "Prompt Manager",
+  "version": "1.0.0",
+  "description": "Save, edit, and trigger reusable prompt instructions by ID using /p <id> and /p e <id> <text>.",
+  "logo": "assets/logo.svg",
+  "repository": "https://github.com/americanumberoneaokgoodtimes/prompt-manager-plugin-opencode-claude-agy-etc",
+  "license": "MIT",
+  "keywords": [
+    "prompts",
+    "instructions",
+    "macros",
+    "shortcuts",
+    "productivity"
+  ],
+  "suggestedPrompts": [
+    "/p",
+    "List my saved prompts",
+    "Explain how to save and run prompts with /p"
+  ]
+}
